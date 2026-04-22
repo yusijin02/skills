@@ -26,30 +26,39 @@ Options:
 - `auto`: Auto-detect based on input (default)
 
 ### Output Path Convention
-- Paper mode creates: `{output_dir}/paper-analyzer-output/{arxiv-id}/`
-- PDF: `{output_dir}/paper-analyzer-output/{arxiv-id}/{arxiv-id}.pdf`
-- Extracted text: `{output_dir}/paper-analyzer-output/{arxiv-id}/{arxiv-id}.txt`
-- Full-page images: `{output_dir}/paper-analyzer-output/{arxiv-id}/full_pages/` (150 DPI, layout analysis)
-- Cropped images: `{output_dir}/paper-analyzer-output/{arxiv-id}/crops/` (300 DPI, high-res)
-- PDF structure: `{output_dir}/paper-analyzer-output/{arxiv-id}/pdf_structure.json`
+- Paper mode creates: `{output_dir}/{arxiv-id}/`
+- PDF: `{output_dir}/{arxiv-id}/{arxiv-id}.pdf`
+- Extracted text: `{output_dir}/{arxiv-id}/{arxiv-id}.txt`
+- Full-page images: `{output_dir}/{arxiv-id}/full_pages/` (150 DPI, for layout analysis)
+- Cropped images: `{output_dir}/{arxiv-id}/crops/` (300 DPI, for detailed analysis)
+- PDF structure: `{output_dir}/{arxiv-id}/pdf_structure.json`
 - Manifests: `page_manifest.txt`, `paper_info.txt`
 
-### Two-Stage Image Extraction
+### Two-Stage Image Extraction (MANDATORY Workflow)
 ```
-Stage 1: Full-page extraction
-- Extract full pages at 150 DPI to full_pages/
-- These are for the vision model to identify figure/table positions
+Stage 1: Full-page extraction (DONE BY SCRIPT)
+- Script extracts full pages at 150 DPI to full_pages/page_N.png
+- Script extracts PDF structure to pdf_structure.json (figure captions, table captions)
+- Script creates page_manifest.txt listing all pages
 
-Stage 2: High-res cropping (after vision model provides boxes)
-- Use --crop --page N --bbox x0,y0,x1,y1 to crop specific regions at 300 DPI
-- Coordinates are in PDF points (72 points = 1 inch)
-- Cropped images saved to crops/ directory
+Stage 2: Vision-based Figure Detection (DONE BY AGENT)
+For each page with figures:
+  1. Read full_pages/page_N.png
+  2. Send to vision model to identify figure/table bounding boxes
+  3. Vision model returns: {page: N, boxes: [{type: "figure", x0, y0, x1, y1, caption: "..."}]}
+  4. Use --crop command to extract high-res crops at 300 DPI
+  5. Save cropped images to crops/ directory
+
+IMPORTANT: Do NOT analyze full-page images directly. Always crop first for high-res detail.
 ```
 
 ### Image Cropping Usage
 ```bash
 # Crop a region from page 5 at 300 DPI
 python scripts/analyze.py --crop --page 5 --bbox "100,200,400,500" ./output-dir
+
+# Coordinates are in PDF points (72 points = 1 inch, origin at bottom-left)
+# Example: crop from x=100, y=200 to x=400, y=500 points
 ```
 
 ---
@@ -235,23 +244,25 @@ Files created/modified:
 ## 4.1 Image Analyzer
 
 ### Invocation
-- When MainAgent discovers figures, diagrams, tables, pseudocode
+- When MainAgent has high-res cropped images from crops/ directory
 - When user explicitly requests
 
-### CRITICAL: Process ALL Images
-- Do NOT skip any image, even if it seems minor or redundant
-- Every figure, table, flowchart, and pseudocode must be analyzed
-- Check `processing_manifest.txt` to ensure all entities are covered
+### CRITICAL: Analyze CROPPED Images Only
+- Full-page images (full_pages/) are for LAYOUT ANALYSIS ONLY
+- Do NOT analyze full_pages/ images directly for figure content
+- Only analyze images in crops/ directory
+- Each crop should be ONE figure, table, or pseudocode
+- Use vision model to analyze the cropped high-res image
 
 ### Input
 ```
-- Image screenshot/description
-- Image context (caption, paragraph before/after)
+- High-res cropped image from crops/ directory
+- Image context: caption text, page number
 ```
 
 ### Output Directory Structure
 ```
-{output_dir}/images/{image_id}/
+{output_dir}/crops/{image_id}/
 ├── report.md      # Detailed analysis
 ├── summary.md     # For MainAgent
 └── analysis.json  # Structured data

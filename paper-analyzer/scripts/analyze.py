@@ -442,7 +442,9 @@ def main():
             arxiv_id = parse_arxiv_id(args.input)
             print(f"Parsed arXiv ID: {arxiv_id}")
 
-            paper_output_dir = os.path.join(output_dir, f"paper-analyzer-output", arxiv_id)
+            # Final output structure: {output_dir}/{arxiv-id}/
+            # Do NOT add extra paper-analyzer-output nesting
+            paper_output_dir = os.path.join(output_dir, arxiv_id)
             os.makedirs(paper_output_dir, exist_ok=True)
 
             pdf_path, text_path, page_count = download_arxiv_pdf(arxiv_id, paper_output_dir)
