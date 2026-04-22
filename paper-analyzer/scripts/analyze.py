@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Paper Analyzer - Entry point for paper/code analysis
-Supports both paper mode (arXiv) and code-only mode
+Supports both paper mode (arXiv PDF) and code-only mode
 Uses wget/curl for all network requests
 """
 
@@ -25,91 +25,117 @@ def parse_arxiv_id(link: str) -> str:
             return match.group(1)
     raise ValueError(f"Cannot parse arXiv ID from: {link}")
 
-def download_arxiv_html(arxiv_id: str, output_dir: str) -> tuple[str, list[str]]:
-    """Download arXiv paper as HTML and extract embedded images
+def download_arxiv_pdf(arxiv_id: str, output_dir: str) -> tuple[str, str]:
+    """Download arXiv paper as PDF and extract text/images
 
     Returns:
-        tuple of (html_path, list of downloaded image paths)
+        tuple of (pdf_path, text_path)
     """
-    html_url = f"https://arxiv.org/abs/{arxiv_id}"
-    output_path = os.path.join(output_dir, f"{arxiv_id}.html")
+    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+    pdf_path = os.path.join(output_dir, f"{arxiv_id}.pdf")
+    text_path = os.path.join(output_dir, f"{arxiv_id}.txt")
     images_dir = os.path.join(output_dir, "images")
     os.makedirs(images_dir, exist_ok=True)
 
-    print(f"Downloading paper HTML: {html_url}")
+    print(f"Downloading paper PDF: {pdf_url}")
 
     result = subprocess.run(
-        ["wget", "-q", "-O", output_path, html_url],
+        ["wget", "-q", "-O", pdf_path, pdf_url],
         capture_output=True,
         text=True
     )
 
     if result.returncode != 0:
         result = subprocess.run(
-            ["curl", "-s", "-o", output_path, html_url],
+            ["curl", "-s", "-o", pdf_path, pdf_url],
             capture_output=True,
             text=True
         )
         if result.returncode != 0:
-            raise RuntimeError(f"Download failed: {result.stderr}")
+            raise RuntimeError(f"PDF download failed: {result.stderr}")
 
-    print(f"Saved to: {output_path}")
+    print(f"Downloaded to: {pdf_path}")
 
-    # Extract image URLs from HTML
-    with open(output_path, 'r', encoding='utf-8') as f:
-        html_content = f.read()
-
-    # Find all image URLs (arxiv CDN images)
-    img_pattern = r'src="(https://[^"]*\.arxiv\.org[^"]*\.(?:png|jpg|jpeg|gif|png\S*))"'
-    img_urls = re.findall(img_pattern, html_content)
-
-    # Also find dataicke URLs
-    img_pattern2 = r'src="(https://[^"]*dataicke[^"]*\.(?:png|jpg|jpeg|gif))"'
-    img_urls.extend(re.findall(img_pattern2, html_content))
-
-    img_urls = list(set(img_urls))  # deduplicate
-    downloaded_images = []
-
-    for i, img_url in enumerate(img_urls):
-        img_ext = os.path.splitext(img_url)[1] or '.png'
-        img_name = f"fig_{i+1}{img_ext}"
-        img_path = os.path.join(images_dir, img_name)
-
-        print(f"Downloading image: {img_url}")
+    # Extract text from PDF using pdftotext
+    print("Extracting text from PDF...")
+    result = subprocess.run(
+        ["pdftotext", "-q", pdf_path, text_path],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"Warning: pdftotext failed: {result.stderr}")
+        # Try with layout preservation
         result = subprocess.run(
-            ["wget", "-q", "-O", img_path, img_url],
+            ["pdftotext", "-layout", pdf_path, text_path],
             capture_output=True,
             text=True
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                ["curl", "-s", "-o", img_path, img_url],
-                capture_output=True,
-                text=True
-            )
-        if result.returncode == 0:
-            downloaded_images.append(img_path)
-            print(f"  -> {img_path}")
+    print(f"Text extracted to: {text_path}")
 
-    # Write manifest of images to process
+    # Extract images from PDF using pdftoppm
+    print("Extracting images from PDF...")
+    img_base = os.path.join(images_dir, "fig")
+    result = subprocess.run(
+        ["pdftoppm", "-png", "-r", "150", pdf_path, img_base],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"Warning: pdftoppm failed: {result.stderr}")
+
+    # Count extracted images
+    extracted_images = sorted([
+        f for f in os.listdir(images_dir)
+        if f.startswith("fig") and f.endswith(".png")
+    ])
+
+    print(f"Extracted {len(extracted_images)} images to {images_dir}/")
+
+    # Write manifests
     manifest_path = os.path.join(output_dir, "image_manifest.txt")
     with open(manifest_path, 'w') as f:
-        f.write(f"TOTAL_IMAGES: {len(downloaded_images)}\n")
-        for i, img_path in enumerate(downloaded_images):
+        f.write(f"TOTAL_IMAGES: {len(extracted_images)}\n")
+        for i, img in enumerate(extracted_images):
+            img_path = os.path.join(images_dir, img)
             f.write(f"IMAGE_{i+1}: {img_path}\n")
 
-    print(f"\n=== IMAGE MANIFEST ===")
-    print(f"Total images found: {len(downloaded_images)}")
-    print(f"Manifest: {manifest_path}")
+    # Write page count and basic info
+    info_path = os.path.join(output_dir, "paper_info.txt")
+    result = subprocess.run(
+        ["pdfinfo", pdf_path],
+        capture_output=True,
+        text=True
+    )
+    page_count = 0
+    if result.returncode == 0:
+        for line in result.stdout.split('\n'):
+            if line.startswith('Pages:'):
+                page_count = int(line.split(':')[1].strip())
+                break
+
+    with open(info_path, 'w') as f:
+        f.write(f"ARXIV_ID: {arxiv_id}\n")
+        f.write(f"PAGES: {page_count}\n")
+        f.write(f"PDF_PATH: {pdf_path}\n")
+        f.write(f"TEXT_PATH: {text_path}\n")
+        f.write(f"TOTAL_IMAGES: {len(extracted_images)}\n")
+
+    print(f"\n=== PAPER MANIFEST ===")
+    print(f"arXiv ID: {arxiv_id}")
+    print(f"Pages: {page_count}")
+    print(f"Total images: {len(extracted_images)}")
+    print(f"PDF: {pdf_path}")
+    print(f"Text: {text_path}")
+    print(f"Images: {images_dir}/")
     print(f"========================\n")
 
-    return output_path, downloaded_images
+    return pdf_path, text_path
 
 def clone_repository(url: str, output_dir: str) -> str:
     """Clone GitHub repository using git"""
     print(f"Cloning repository: {url}")
 
-    # Extract repo path from URL
     match = re.search(r'github\.com[/:](.+?)(?:\.git)?$', url)
     if not match:
         raise ValueError(f"Cannot parse GitHub URL: {url}")
@@ -142,7 +168,6 @@ def main():
     args = parser.parse_args()
 
     try:
-        # Determine mode
         mode = args.mode
         if mode == "auto":
             if "github.com" in args.input.lower():
@@ -150,24 +175,27 @@ def main():
             else:
                 mode = "paper"
 
-        # Resolve output_dir - if relative path given, use current working directory
         output_dir = os.path.abspath(args.output_dir)
 
         if mode == "paper":
             arxiv_id = parse_arxiv_id(args.input)
             print(f"Parsed arXiv ID: {arxiv_id}")
 
-            # Create output directory: paper-analyzer-output/{arxiv-id}/
             paper_output_dir = os.path.join(output_dir, f"paper-analyzer-output", arxiv_id)
             os.makedirs(paper_output_dir, exist_ok=True)
 
-            html_path, downloaded_images = download_arxiv_html(arxiv_id, paper_output_dir)
+            pdf_path, text_path = download_arxiv_pdf(arxiv_id, paper_output_dir)
+
+            # Count images
+            images_dir = os.path.join(paper_output_dir, "images")
+            img_count = len([f for f in os.listdir(images_dir) if f.startswith("fig") and f.endswith(".png")]) if os.path.exists(images_dir) else 0
 
             print(f"\n=== ANALYZER_READY ===")
             print(f"MODE: paper")
-            print(f"HTML_PATH: {html_path}")
+            print(f"PDF_PATH: {pdf_path}")
+            print(f"TEXT_PATH: {text_path}")
             print(f"OUTPUT_DIR: {paper_output_dir}")
-            print(f"IMAGE_COUNT: {len(downloaded_images)}")
+            print(f"IMAGE_COUNT: {img_count}")
             print(f"ARXIV_ID: {arxiv_id}")
             print(f"DEEP_MODE: {args.deep}")
             print(f"AUTO_AGENT: {not args.no_agent}")

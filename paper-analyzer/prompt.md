@@ -8,7 +8,7 @@ This document contains the complete specifications for the Paper Analyzer skill.
 
 ## Entry Point Script
 
-`scripts/analyze.py` handles input parsing, HTML download, and image extraction:
+`scripts/analyze.py` handles input parsing, PDF download, text extraction, and image extraction:
 
 ```
 python scripts/analyze.py <input> <output_dir> [options]
@@ -21,13 +21,16 @@ Options:
 ```
 
 ### Mode Detection
-- `paper`: arXiv link/ID → download HTML + extract images → analyze
+- `paper`: arXiv link/ID → download PDF + extract text/images → analyze
 - `code`: GitHub URL → clone → analyze
 - `auto`: Auto-detect based on input (default)
 
 ### Output Path Convention
 - Paper mode creates: `{output_dir}/paper-analyzer-output/{arxiv-id}/`
-- Images pre-downloaded to: `{output_dir}/paper-analyzer-output/{arxiv-id}/images/`
+- PDF: `{output_dir}/paper-analyzer-output/{arxiv-id}/{arxiv-id}.pdf`
+- Extracted text: `{output_dir}/paper-analyzer-output/{arxiv-id}/{arxiv-id}.txt`
+- Images extracted via pdftoppm: `{output_dir}/paper-analyzer-output/{arxiv-id}/images/`
+- Manifests: `image_manifest.txt`, `paper_info.txt`
 
 ---
 
@@ -60,14 +63,15 @@ Ask user for confirmation
 - Focus on Method and Experiment sections
 - Scan ALL figures, tables, formulas (DO NOT SKIP ANY)
 - Extract architecture, loss functions, training details
+- Read the extracted text from `{arxiv-id}.txt` for full paper content
 
 **CRITICAL: Extract ALL Images and Formulas**
-- Before analyzing, read `image_manifest.txt` to get the count of downloaded images
+- Before analyzing, read `image_manifest.txt` and `paper_info.txt` to get counts
 - Write a `processing_manifest.txt` file listing every entity to process:
   ```
   TOTAL_IMAGES: N
-  IMAGE_1: path/to/image_1.png
-  IMAGE_2: path/to/image_2.png
+  IMAGE_1: path/to/image_1.png (page X)
+  IMAGE_2: path/to/image_2.png (page Y)
   ...
   TOTAL_FORMULAS: M
   FORMULA_1: eq_1 (page X)
@@ -78,8 +82,9 @@ Ask user for confirmation
   ```
   PROCESSED: X/N images, Y/M formulas
   ```
-- If HTML paper, images are pre-downloaded in `images/` folder with sequential names (fig_1.png, fig_2.png, etc.)
+- PDF images are extracted as page snapshots: `images/fig_1.png`, `images/fig_2.png`, etc. (one per page that contains figures)
 - DO NOT skip any entity - every image and formula must be analyzed
+- For formulas in PDF: search for LaTeX patterns `$, $$, \( \)` in the text file, or infer from context
 
 **Code Mode:**
 - Analyze project structure
