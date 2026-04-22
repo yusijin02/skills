@@ -34,22 +34,39 @@ Options:
 - PDF structure: `{output_dir}/{arxiv-id}/pdf_structure.json`
 - Manifests: `page_manifest.txt`, `paper_info.txt`
 
-### Two-Stage Image Extraction (MANDATORY Workflow)
+### Two-Stage Image Extraction (MANDATORY - DO NOT SKIP ANY PAGE)
+
+**STRICT RULE: You MUST process EVERY single page of the paper.**
+
 ```
 Stage 1: Full-page extraction (DONE BY SCRIPT)
-- Script extracts full pages at 150 DPI to full_pages/page_N.png
-- Script extracts PDF structure to pdf_structure.json (figure captions, table captions)
-- Script creates page_manifest.txt listing all pages
+- full_pages/page_N.png - 150 DPI full page images (one per page)
+- pdf_structure.json - figure/table captions from PDF
+- page_manifest.txt - list of all pages
+- paper_info.txt - page count, arXiv ID, etc.
 
-Stage 2: Vision-based Figure Detection (DONE BY AGENT)
-For each page with figures:
-  1. Read full_pages/page_N.png
-  2. Send to vision model to identify figure/table bounding boxes
-  3. Vision model returns: {page: N, boxes: [{type: "figure", x0, y0, x1, y1, caption: "..."}]}
-  4. Use --crop command to extract high-res crops at 300 DPI
-  5. Save cropped images to crops/ directory
+Stage 2: Vision-based Figure Detection (MANDATORY - EVERY PAGE)
 
-IMPORTANT: Do NOT analyze full-page images directly. Always crop first for high-res detail.
+For EACH page from 1 to N:
+  1. Read full_pages/page_{N}.png
+  2. Send to vision model to identify ALL figures, tables, pseudocode
+  3. Vision model returns bounding boxes with coordinates
+  4. For EACH identified figure/table:
+     - Call: python scripts/analyze.py --crop --page {N} --bbox "x0,y0,x1,y1" {output_dir}
+     - Coordinates are in PDF points (72 pts = 1 inch)
+     - Origin is BOTTOM-LEFT corner
+  5. Save cropped high-res images to crops/
+
+Example crop commands for page 5 with 2 figures:
+  python scripts/analyze.py --crop --page 5 --bbox "50,100,400,350" ./output-dir
+  python scripts/analyze.py --crop --page 5 --bbox "50,380,400,550" ./output-dir
+
+TRACK PROGRESS:
+- Write progress_manifest.txt after each page
+- Format: PAGE_1: processed, found 3 figures, 1 table
+         PAGE_2: processed, found 1 figure, 2 tables
+         ...
+- DO NOT skip any page - even pages without figures should be marked as "no figures found"
 ```
 
 ### Image Cropping Usage
@@ -94,34 +111,35 @@ Ask user for confirmation
 - Extract architecture, loss functions, training details
 - Read the extracted text from `{arxiv-id}.txt` for full paper content
 
-**CRITICAL: Extract ALL Images and Formulas (Two-Stage)**
-- Stage 1: Read `page_manifest.txt` and `paper_info.txt` to understand page structure
-- Stage 2: For each page with figures/tables:
-  1. Send full-page image (from `full_pages/`) to vision model
-  2. Vision model returns bounding boxes for figures/tables
-  3. Call `analyze.py --crop` to extract high-res crops at 300 DPI
-  4. Analyze each cropped image individually
+**CRITICAL: Process EVERY Page (MANDATORY)**
 
-- Write a `processing_manifest.txt` file listing every entity to process:
-  ```
-  TOTAL_PAGES: N
-  PAGE_1: full_pages/page_1.png
-    FIGURES: [box1, box2]
-    TABLES: [box3]
-  ...
-  TOTAL_FORMULAS: M
-  FORMULA_1: eq_1 (page X)
-  FORMULA_2: eq_2 (page Y)
-  ...
-  ```
-- Track progress in `progress_manifest.txt`:
-  ```
-  PROCESSED_PAGES: X/N
-  PROCESSED_FIGURES: Y/M figures
-  PROCESSED_TABLES: Z/K tables
-  ```
-- DO NOT skip any entity - every figure, table, and formula must be analyzed
-- For formulas in PDF: search for LaTeX patterns `$, $$, \( \)` in the text file, or infer from context
+You MUST process every single page of the paper. This is not optional.
+
+Step 1: Read `page_manifest.txt` to get total page count N
+Step 2: For page 1 to N:
+  - Read `full_pages/page_{i}.png`
+  - Use vision model to identify ALL figures, tables, pseudocode
+  - For each identified entity, call --crop to extract high-res image
+  - Log findings in `progress_manifest.txt`
+
+Step 3: Formulas - search in `{arxiv-id}.txt` for LaTeX patterns
+
+MANDATORY OUTPUT FILES:
+```
+processing_manifest.txt - what you plan to process
+progress_manifest.txt   - what you have processed (updated in real-time)
+```
+
+Example progress_manifest.txt:
+```
+TOTAL_PAGES: 15
+PAGE_1: done, figures=[fig_1], tables=[], formulas=[eq_1]
+PAGE_2: done, figures=[fig_2], tables=[table_1], formulas=[eq_2, eq_3]
+PAGE_3: done, figures=[], tables=[], formulas=[eq_4]
+...
+```
+
+DO NOT skip any page. Pages without figures should be marked "no figures found".
 
 **Code Mode:**
 - Analyze project structure
