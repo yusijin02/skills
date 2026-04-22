@@ -29,8 +29,28 @@ Options:
 - Paper mode creates: `{output_dir}/paper-analyzer-output/{arxiv-id}/`
 - PDF: `{output_dir}/paper-analyzer-output/{arxiv-id}/{arxiv-id}.pdf`
 - Extracted text: `{output_dir}/paper-analyzer-output/{arxiv-id}/{arxiv-id}.txt`
-- Images extracted via pdftoppm: `{output_dir}/paper-analyzer-output/{arxiv-id}/images/`
-- Manifests: `image_manifest.txt`, `paper_info.txt`
+- Full-page images: `{output_dir}/paper-analyzer-output/{arxiv-id}/full_pages/` (150 DPI, layout analysis)
+- Cropped images: `{output_dir}/paper-analyzer-output/{arxiv-id}/crops/` (300 DPI, high-res)
+- PDF structure: `{output_dir}/paper-analyzer-output/{arxiv-id}/pdf_structure.json`
+- Manifests: `page_manifest.txt`, `paper_info.txt`
+
+### Two-Stage Image Extraction
+```
+Stage 1: Full-page extraction
+- Extract full pages at 150 DPI to full_pages/
+- These are for the vision model to identify figure/table positions
+
+Stage 2: High-res cropping (after vision model provides boxes)
+- Use --crop --page N --bbox x0,y0,x1,y1 to crop specific regions at 300 DPI
+- Coordinates are in PDF points (72 points = 1 inch)
+- Cropped images saved to crops/ directory
+```
+
+### Image Cropping Usage
+```bash
+# Crop a region from page 5 at 300 DPI
+python scripts/analyze.py --crop --page 5 --bbox "100,200,400,500" ./output-dir
+```
 
 ---
 
@@ -65,13 +85,20 @@ Ask user for confirmation
 - Extract architecture, loss functions, training details
 - Read the extracted text from `{arxiv-id}.txt` for full paper content
 
-**CRITICAL: Extract ALL Images and Formulas**
-- Before analyzing, read `image_manifest.txt` and `paper_info.txt` to get counts
+**CRITICAL: Extract ALL Images and Formulas (Two-Stage)**
+- Stage 1: Read `page_manifest.txt` and `paper_info.txt` to understand page structure
+- Stage 2: For each page with figures/tables:
+  1. Send full-page image (from `full_pages/`) to vision model
+  2. Vision model returns bounding boxes for figures/tables
+  3. Call `analyze.py --crop` to extract high-res crops at 300 DPI
+  4. Analyze each cropped image individually
+
 - Write a `processing_manifest.txt` file listing every entity to process:
   ```
-  TOTAL_IMAGES: N
-  IMAGE_1: path/to/image_1.png (page X)
-  IMAGE_2: path/to/image_2.png (page Y)
+  TOTAL_PAGES: N
+  PAGE_1: full_pages/page_1.png
+    FIGURES: [box1, box2]
+    TABLES: [box3]
   ...
   TOTAL_FORMULAS: M
   FORMULA_1: eq_1 (page X)
@@ -80,10 +107,11 @@ Ask user for confirmation
   ```
 - Track progress in `progress_manifest.txt`:
   ```
-  PROCESSED: X/N images, Y/M formulas
+  PROCESSED_PAGES: X/N
+  PROCESSED_FIGURES: Y/M figures
+  PROCESSED_TABLES: Z/K tables
   ```
-- PDF images are extracted as page snapshots: `images/fig_1.png`, `images/fig_2.png`, etc. (one per page that contains figures)
-- DO NOT skip any entity - every image and formula must be analyzed
+- DO NOT skip any entity - every figure, table, and formula must be analyzed
 - For formulas in PDF: search for LaTeX patterns `$, $$, \( \)` in the text file, or infer from context
 
 **Code Mode:**
